@@ -2,32 +2,29 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>Numbers Game</title>
+    <title>本格数独ゲーム</title>
     <style>
         :root {
             --border-thick: 3px solid #333;
             --border-thin: 1px solid #999;
             --cell-size: 50px;
-            --selected-bg: #e0f7fa;
         }
 
         body {
-            font-family: 'Helvetica Neue', Arial, sans-serif;
+            font-family: sans-serif;
             display: flex;
             flex-direction: column;
             align-items: center;
-            background-color: #f0f2f5;
+            background-color: #f8f9fa;
         }
 
-        h1 { color: #333; }
-
-        /* ボードのスタイル */
         #sudoku-board {
             display: grid;
             grid-template-columns: repeat(9, var(--cell-size));
             grid-template-rows: repeat(9, var(--cell-size));
             border: var(--border-thick);
             background-color: white;
+            margin-bottom: 20px;
         }
 
         .cell {
@@ -36,35 +33,35 @@
             box-sizing: border-box;
             border: var(--border-thin);
             text-align: center;
-            font-size: 20px;
+            font-size: 22px;
             line-height: var(--cell-size);
             cursor: pointer;
-            user-select: none;
+            outline: none;
         }
 
-        /* 3x3のブロック区切り */
+        /* 3x3の太線区切り */
         .cell:nth-child(3n) { border-right: var(--border-thick); }
         .cell:nth-child(9n) { border-right: var(--border-thick); }
         .cell:nth-child(n+19):nth-child(-n+27),
         .cell:nth-child(n+46):nth-child(-n+54) { border-bottom: var(--border-thick); }
         .cell:nth-last-child(-n+9) { border-bottom: none; }
 
-        .cell.fixed { font-weight: bold; color: #000; background-color: #f8f8f8; }
-        .cell.selected { background-color: var(--selected-bg); }
-        .cell.wrong { color: red; }
+        .cell.fixed { font-weight: bold; color: #333; background-color: #eee; cursor: default; }
+        .cell.selected { background-color: #bbdefb; }
+        .cell.revealed { color: #1976d2; } /* 答え合わせで表示された数字 */
 
-        /* 操作パネル */
-        .controls { margin-top: 20px; display: flex; gap: 10px; }
+        .controls { display: flex; gap: 10px; margin-bottom: 10px; }
         button {
-            padding: 10px 20px;
-            font-size: 16px;
+            padding: 10px 15px;
+            font-size: 14px;
             cursor: pointer;
-            border-radius: 5px;
-            border: none;
-            background-color: #007bff;
-            color: white;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            background: white;
         }
-        button:hover { background-color: #0056b3; }
+        button:hover { background: #e2e2e2; }
+        .primary { background: #007bff; color: white; border: none; }
+        .primary:hover { background: #0056b3; }
     </style>
 </head>
 <body>
@@ -74,78 +71,128 @@
     <div id="sudoku-board"></div>
 
     <div class="controls">
-        <button onclick="checkGame()">答え合わせ</button>
-        <button onclick="resetGame()">新しく始める</button>
+        <button class="primary" onclick="revealAnswer()">答え合わせ (表示)</button>
+        <button onclick="initGame()">新しく始める</button>
     </div>
 
-    <p>セルをクリックして、キーボードの1-9で数字を入力してください。</p>
+    <p style="font-size: 0.9em; color: #666;">
+        マスを選択して、キーボードの 1-9 で入力。Backspaceで消去。
+    </p>
 
     <script>
         const boardElement = document.getElementById('sudoku-board');
+        let solution = []; // 正解データ
+        let puzzle = [];   // 問題データ
         let selectedCell = null;
 
-        // サンプルの盤面 (0は空セル)
-        const puzzle = [
-            [5, 3, 0, 0, 7, 0, 0, 0, 0],
-            [6, 0, 0, 1, 9, 5, 0, 0, 0],
-            [0, 9, 8, 0, 0, 0, 0, 6, 0],
-            [8, 0, 0, 0, 6, 0, 0, 0, 3],
-            [4, 0, 0, 8, 0, 3, 0, 0, 1],
-            [7, 0, 0, 0, 2, 0, 0, 0, 6],
-            [0, 6, 0, 0, 0, 0, 2, 8, 0],
-            [0, 0, 0, 4, 1, 9, 0, 0, 5],
-            [0, 0, 0, 0, 8, 0, 0, 7, 9]
-        ];
+        // 1. 数独の生成ロジック
+        function generateSudoku() {
+            const board = Array.from({ length: 9 }, () => Array(9).fill(0));
+            
+            // 正解の盤面を生成
+            fillSudoku(board);
+            solution = board.map(row => [...row]);
 
-        // 盤面の生成
-        function createBoard() {
+            // 数字をランダムに消去して問題を作る（難易度調整：40個残す）
+            const quiz = board.map(row => [...row]);
+            let attempts = 41; 
+            while (attempts > 0) {
+                let r = Math.floor(Math.random() * 9);
+                let c = Math.floor(Math.random() * 9);
+                if (quiz[r][c] !== 0) {
+                    quiz[r][c] = 0;
+                    attempts--;
+                }
+            }
+            puzzle = quiz;
+        }
+
+        // バックトラッキング法による数字配置
+        function fillSudoku(board) {
+            for (let i = 0; i < 81; i++) {
+                let row = Math.floor(i / 9);
+                let col = i % 9;
+                if (board[row][col] === 0) {
+                    let nums = [1, 2, 3, 4, 5, 6, 7, 8, 9].sort(() => Math.random() - 0.5);
+                    for (let num of nums) {
+                        if (isValid(board, row, col, num)) {
+                            board[row][col] = num;
+                            if (fillSudoku(board)) return true;
+                            board[row][col] = 0;
+                        }
+                    }
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        function isValid(board, row, col, num) {
+            for (let i = 0; i < 9; i++) {
+                if (board[row][i] === num || board[i][col] === num) return false;
+                let boxRow = 3 * Math.floor(row / 3) + Math.floor(i / 3);
+                let boxCol = 3 * Math.floor(col / 3) + i % 3;
+                if (board[boxRow][boxCol] === num) return false;
+            }
+            return true;
+        }
+
+        // 2. 盤面の描画
+        function drawBoard() {
             boardElement.innerHTML = '';
             for (let r = 0; r < 9; r++) {
                 for (let c = 0; c < 9; c++) {
                     const cell = document.createElement('div');
                     cell.classList.add('cell');
-                    const val = puzzle[r][c];
+                    cell.dataset.row = r;
+                    cell.dataset.col = c;
                     
-                    if (val !== 0) {
-                        cell.innerText = val;
+                    if (puzzle[r][c] !== 0) {
+                        cell.innerText = puzzle[r][c];
                         cell.classList.add('fixed');
                     } else {
-                        cell.addEventListener('click', () => selectCell(cell));
+                        cell.addEventListener('click', () => {
+                            if (selectedCell) selectedCell.classList.remove('selected');
+                            selectedCell = cell;
+                            selectedCell.classList.add('selected');
+                        });
                     }
                     boardElement.appendChild(cell);
                 }
             }
         }
 
-        // セルの選択
-        function selectCell(cell) {
-            if (selectedCell) selectedCell.classList.remove('selected');
-            selectedCell = cell;
-            selectedCell.classList.add('selected');
+        // 3. 答えの表示
+        function revealAnswer() {
+            const cells = document.querySelectorAll('.cell');
+            cells.forEach(cell => {
+                const r = cell.dataset.row;
+                const c = cell.dataset.col;
+                if (!cell.classList.contains('fixed')) {
+                    cell.innerText = solution[r][c];
+                    cell.classList.add('revealed');
+                }
+            });
         }
 
-        // キー入力イベント
+        // 4. キーボード操作
         document.addEventListener('keydown', (e) => {
-            if (!selectedCell) return;
+            if (!selectedCell || selectedCell.classList.contains('fixed')) return;
             if (e.key >= '1' && e.key <= '9') {
                 selectedCell.innerText = e.key;
-                selectedCell.classList.remove('wrong');
+                selectedCell.classList.remove('revealed');
             } else if (e.key === 'Backspace' || e.key === 'Delete') {
                 selectedCell.innerText = '';
             }
         });
 
-        // 簡易的な答え合わせ
-        function checkGame() {
-            const cells = document.querySelectorAll('.cell');
-            alert("解答を送信しました！(この簡易版ではロジックチェックのみ可能です)");
+        // 初期化
+        function initGame() {
+            generateSudoku();
+            drawBoard();
         }
 
-        function resetGame() {
-            createBoard();
-        }
-
-        createBoard();
+        initGame();
     </script>
 </body>
 </html>
